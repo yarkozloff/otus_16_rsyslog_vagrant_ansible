@@ -1,0 +1,2 @@
+# otus_16_rsyslog_vagrant_ansible
+Централизованный сбор логов
