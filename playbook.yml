@@ -1,0 +1,161 @@
+- hosts: log # log server
+  become: true
+  tasks:
+    - name: install packages # переведём синтаксис yum из deprecated 
+      yum:
+        name: '{{ item }}'
+        state: present
+        update_cache: True
+      with_items:
+        - epel-release
+        - vim
+
+    - name: "rm /etc/localtime"
+      shell:
+        cmd: "rm /etc/localtime"
+
+    - name: copy time
+      copy:
+        src: install/time
+        dest: /etc/localtime
+        owner: root
+        group: root
+        mode: 0640
+
+    - name: "install time"
+      shell:
+        cmd: "mv -f /etc/localtime /etc/localtime.bak && ln -s /usr/share/zoneinfo/Europe/Moscow /etc/localtime"
+    
+    - name: "update /etc/rsyslog.conf"
+      lineinfile:
+        dest: /etc/rsyslog.conf
+        line: "{{ item }}"
+      with_items:
+        - 'module(load="imudp")'
+        - 'input(type="imudp" port="514")'
+        - 'module(load="imtcp")'
+        - 'input(type="imtcp" port="514")'
+        - '$template RemoteLogs,"/var/log/rsyslog/%HOSTNAME%/%PROGRAMNAME%.log"'
+        - '*.* ?RemoteLogs'
+        - '& ~'
+        
+    - name: "restart rsyslog"
+      shell:
+        cmd: "systemctl restart rsyslog"
+
+    - name: "change /etc/audit/auditd.conf"
+      lineinfile: 
+        dest=/etc/audit/auditd.conf
+        regexp='##tcp_listen_port = 60'
+        insertbefore=BOF
+        line='tcp_listen_port = 60'
+
+    - name: "restart auditd"
+      shell:
+        cmd: "service auditd restart"
+
+
+
+- hosts: web # web server - nginx
+  become: true
+  tasks:
+    - name: install packages # переведём синтаксис yum из deprecated 
+      yum:
+        name: '{{ item }}'
+        state: present
+        update_cache: True
+      with_items:
+        - epel-release
+        - vim
+    
+    - name: "rm /etc/localtime"
+      shell:
+        cmd: "rm /etc/localtime"
+
+    - name: copy time
+      copy:
+        src: install/time
+        dest: /etc/localtime
+        owner: root
+        group: root
+        mode: 0640
+
+    - name: "install time"
+      shell:
+        cmd: "mv -f /etc/localtime /etc/localtime.bak && ln -s /usr/share/zoneinfo/Europe/Moscow /etc/localtime"
+
+    - name: install packages # переведём синтаксис yum из deprecated 
+      yum:
+        name: nginx
+        state: present
+        update_cache: True
+
+    - name: "start nginx"
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: "update /etc/nginx/nginx.conf"
+      copy:
+        src: install/nginx.conf
+        dest: /etc/nginx/nginx.conf
+        owner: vagrant
+        group: vagrant
+        mode: 0644
+
+    - name: "restart nginx"
+      ansible.builtin.systemd:
+        name: nginx.service
+        state: restarted
+        enabled: yes
+
+    - name: "rm image for testnginx_access.log"
+      shell:
+        cmd: "rm -f /usr/share/nginx/html/img/header-background.png"
+
+    - name: "update /etc/audit/rules.d/audit.rules"
+      lineinfile:
+        dest: /etc/audit/rules.d/audit.rules
+        line: "{{ item }}"
+      with_items:
+        - '-w /etc/nginx/nginx.conf -p wa -k nginx_conf'
+        - '-w /etc/nginx/default.d/ -p wa -k nginx_conf'
+
+    - name: "restart auditd"
+      shell:
+        cmd: "service auditd restart"
+
+    - name: "change /etc/audit/auditd.conf"
+      lineinfile: 
+        dest=/etc/audit/auditd.conf
+        regexp='^name_format'
+        insertbefore=BOF
+        line='name_format = HOSTNAME'
+
+    - name: install packages # переведём синтаксис yum из deprecated 
+      yum:
+        name: audispd-plugins
+        state: present
+        update_cache: True
+    
+    - name: "change /etc/audisp/plugins.d/au-remote.conf"
+      lineinfile: 
+        dest=/etc/audisp/plugins.d/au-remote.conf
+        regexp='^active'
+        insertbefore=BOF
+        line='active = yes'
+
+    - name: "change /etc/audisp/audisp-remote.conf"
+      lineinfile: 
+        dest=/etc/audisp/audisp-remote.conf
+        regexp='^remote_server'
+        insertbefore=BOF
+        line='remote_server = 192.168.50.11'
+
+    - name: "restart auditd"
+      shell:
+        cmd: "service auditd restart"
+
+    
+
