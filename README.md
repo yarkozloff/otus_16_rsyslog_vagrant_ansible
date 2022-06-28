@@ -227,3 +227,64 @@ node=web type=CWD msg=audit(1656022003.168:1264):  cwd="/root"
 node=web type=PATH msg=audit(1656022003.168:1264): item=0 name="/etc/nginx/nginx.conf" inode=33638010 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:httpd_config_t:s0 objtype=NORMAL cap_fp=0000000000000000 cap_fi=0000000000000000 cap_fe=0 cap_fver=0
 node=web type=PROCTITLE msg=audit(1656022003.168:1264): proctitle=63686D6F64002B78002F6574632F6E67696E782F6E67696E782E636F6E66
 ```
+## Ansible и роль для сборщика логов (web+log)
+Подготовим playbook для обеих машин. Разрушим тестовый машины командой vagran destroy и поднимем их заново (vagrant up) применив роль ansible.
+
+Подключимся к каждой машине и проверим:
+```
+[root@log ~]# date
+Wed Jun 29 01:11:41 MSK 2022
+
+[root@web ~]# date
+Wed Jun 29 01:11:44 MSK 2022
+[root@web ~]# ss -tln | grep 80
+LISTEN     0      128          *:80                       *:*
+LISTEN     0      128       [::]:80                    [::]:*
+[root@web ~]# systemctl status nginx
+● nginx.service - The nginx HTTP and reverse proxy server
+   Loaded: loaded (/usr/lib/systemd/system/nginx.service; enabled; vendor preset: disabled)
+   Active: active (running) since Wed 2022-06-29 00:59:45 MSK; 12min ago
+  Process: 4741 ExecStart=/usr/sbin/nginx (code=exited, status=0/SUCCESS)
+  Process: 4739 ExecStartPre=/usr/sbin/nginx -t (code=exited, status=0/SUCCESS)
+  Process: 4737 ExecStartPre=/usr/bin/rm -f /run/nginx.pid (code=exited, status=0/SUCCESS)
+```
+Дата впорядке. nginx работает
+
+```
+[root@log ~]# ss -tuln | grep 514
+udp    UNCONN     0      0         *:514                   *:*
+udp    UNCONN     0      0      [::]:514                [::]:*
+tcp    LISTEN     0      25        *:514                   *:*
+tcp    LISTEN     0      25     [::]:514                [::]:*
+```
+Открыты порты для rsyslog
+
+```
+[root@log ~]# cat /var/log/rsyslog/web/nginx_error.log
+Jun 29 01:19:43 web nginx_error: 2022/06/29 01:19:43 [error] 5858#5858: *1 open() "/usr/share/nginx/html/favicon.ico" failed (2: No such file or directory), client: 192.168.50.1, server: _, request: "GET /favicon.ico HTTP/1.1", host: "192.168.50.10", referrer: "http://192.168.50.10/"
+
+[root@log ~]# cat /var/log/rsyslog/web/nginx_access.log
+Jun 29 01:19:42 web nginx_access: 192.168.50.1 - - [29/Jun/2022:01:19:42 +0300] "GET / HTTP/1.1" 200 4833 "-" "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:101.0) Gecko/20100101 Firefox/101.0"
+Jun 29 01:19:43 web nginx_access: 192.168.50.1 - - [29/Jun/2022:01:19:43 +0300] "GET /favicon.ico HTTP/1.1" 404 3650 "http://192.168.50.10/" "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:101.0) Gecko/20100101 Firefox/101.0"
+Jun 29 01:19:44 web nginx_access: 192.168.50.1 - - [29/Jun/2022:01:19:44 +0300] "GET / HTTP/1.1" 304 0 "-" "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:101.0) Gecko/20100101 Firefox/101.0"
+```
+При открытии страницы на web сервере в лог записывается информация об nginx
+
+
+```
+[root@log ~]# grep web /var/log/audit/audit.log
+...
+...
+node=web type=SYSCALL msg=audit(1656455049.138:1835): arch=c000003e syscall=268 success=yes exit=0 a0=ffffffffffffff9c a1=1b730f0 a2=1ed a3=7ffef75c9e60 items=1 ppid=5785 pid=5860 auid=1000 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=6 comm="chmod" exe="/usr/bin/chmod" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key="nginx_conf"
+node=web type=CWD msg=audit(1656455049.138:1835):  cwd="/root"
+node=web type=PATH msg=audit(1656455049.138:1835): item=0 name="/etc/nginx/nginx.conf" inode=33636920 dev=08:01 mode=0100644 ouid=1000 ogid=1000 rdev=00:00 obj=system_u:object_r:httpd_config_t:s0 objtype=NORMAL cap_fp=0000000000000000 cap_fi=0000000000000000 cap_fe=0 cap_fver=0
+node=web type=PROCTITLE msg=audit(1656455049.138:1835): proctitle=63686D6F64002B78002F6574632F6E67696E782F6E67696E782E636F6E66
+```
+При изменении прав на конфиг nginx (chmod +x /etc/nginx/nginx.conf) на лог сервер записывается информация
+
+
+### Итоги/планы:
+- Научиться передавать переменные в различные конфиги чтобы заполнять нужные значения (например ip адреса в конфиге)
+- Объединить некоторые таски для их выполнения на нескольких машинах
+
+
